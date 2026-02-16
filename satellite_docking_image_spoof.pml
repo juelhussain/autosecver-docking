@@ -1,5 +1,5 @@
 /*
- * Autonomous Satellite Docking - Promela Model (FIXED)
+ * Autonomous Satellite Docking - Promela Model
  * 
  * Goal: Simulate autonomous docking with an attacker that spoofs camera images.
  * Security Control: Sliding window validation that drops anomalous inputs.
@@ -7,8 +7,6 @@
  * Model Checking Objectives:
  * 1. WITHOUT security control: compromised images lead to HACK state
  * 2. WITH security control: compromised images are dropped, HACK state is unreachable
- * 
- * FIX: Made security control logic DETERMINISTIC using proper guard structure
  */
 
 /* ============================================================================
@@ -567,7 +565,7 @@ end_attacker:
 }
 
 /* ============================================================================
- * INITIALIZATION
+ * INITIALISATION
  * ============================================================================ */
 init {
     printf("========================================\n");
