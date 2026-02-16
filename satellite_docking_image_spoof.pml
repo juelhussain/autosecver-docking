@@ -15,7 +15,7 @@
  * CONFIGURATION: Toggle security control for model checking
  * Set to 1 to enable sliding window validation, 0 to disable
  * ============================================================================ */
-#define SECURITY_CONTROL_ENABLED 1
+#define SECURITY_CONTROL_ENABLED 0
 
 /* Window size for consistency checking */
 #define WINDOW_SIZE 3
@@ -98,10 +98,16 @@ bool ground_intervention_required = false;
 /* Process synchronization */
 bool system_ready = false;
 
+byte intervention_attempts = 0;
+#define MAX_INTERVENTIONS 3
+
+byte visual_servo_cycles = 0;
+#define MAX_VISUAL_SERVO_CYCLES 20
+
 /* ============================================================================
  * COMMUNICATION CHANNELS
  * ============================================================================ */
-chan camera_channel = [2] of { mtype };  /* Buffered channel for camera images */
+chan camera_channel = [1] of { mtype };  /* Buffered channel for camera images */
 
 /* ============================================================================
  * SLIDING WINDOW VALIDATION - DETERMINISTIC VERSION
@@ -272,11 +278,17 @@ end_system:
          * ---------------------------------------- */
         :: (mission_state == VISUAL_SERVO) ->
             printf("State: VISUAL_SERVO (dist=%d)\n", dist);
+            visual_servo_cycles = visual_servo_cycles + 1;
             
+            /* Force progress if stuck too long */
             if
-            :: camera_channel?img ->
-                current_image = img;
-                
+            :: (visual_servo_cycles >= MAX_VISUAL_SERVO_CYCLES) ->
+                printf("VISUAL_SERVO: Max cycles reached\n");
+                mission_state = MISSION_FAILED;
+            :: (visual_servo_cycles < MAX_VISUAL_SERVO_CYCLES) ->
+                if
+                :: camera_channel?img ->
+                    current_image = img;            
                 /* Apply validation based on security setting */
 #if SECURITY_CONTROL_ENABLED
                 validate_image_secure(img);
@@ -341,9 +353,12 @@ end_system:
                 fi
                 
             :: timeout ->
-                /* No camera input available, continue */
-                skip
+                /* No camera input - check if we should fail or retry */
+                printf("VISUAL_SERVO: No camera input - timeout\n");
+                mission_state = ERROR;
             fi
+
+        fi
             
         /* ----------------------------------------
          * CAPTURE STATE
@@ -429,20 +444,28 @@ end_system:
          * ---------------------------------------- */
         :: (mission_state == GROUND_INTERVENTION) ->
             printf("State: GROUND_INTERVENTION\n");
+            intervention_attempts = intervention_attempts + 1;
             
             if
-            :: true ->
-                /* Intervention successful */
-                ground_intervention_required = false;
-                anomaly_detected = false;
-                mission_state = IDLE;
-                printf("Intervention OK -> IDLE\n");
-            :: true ->
-                /* Intervention failed */
+            :: (intervention_attempts >= MAX_INTERVENTIONS) ->
+                /* Too many interventions - mission fails */
                 mission_state = MISSION_FAILED;
-                printf("Intervention FAILED\n");
+                printf("Intervention: MAX ATTEMPTS exceeded -> FAILED\n");
+            :: (intervention_attempts < MAX_INTERVENTIONS) ->
+                if
+                :: true ->
+                    /* Intervention successful */
+                    ground_intervention_required = false;
+                    anomaly_detected = false;
+                    mission_state = IDLE;
+                    printf("Intervention OK -> IDLE\n");
+                :: true ->
+                    /* Intervention failed */
+                    mission_state = MISSION_FAILED;
+                    printf("Intervention FAILED\n");
+                fi
             fi
-            
+
         /* ----------------------------------------
          * HACK STATE - Attacker wins
          * ---------------------------------------- */
@@ -501,7 +524,7 @@ end_camera:
         :: camera_channel!TARGET_DETECTED -> printf("Camera: TARGET\n")
         :: camera_channel!NORMAL_IMAGE -> printf("Camera: NORMAL\n")
         :: camera_channel!INTERESTING_IMAGE -> printf("Camera: INTERESTING\n")
-        :: skip  /* Sometimes no image */
+        //:: skip  /* Sometimes no image */
         fi
     od
 }
